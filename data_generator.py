@@ -1,4 +1,5 @@
-### BEGIN INIT INFO
+#!/usr/bin/env python3
+# ### BEGIN INIT INFO
 # Provides:          data_generator.py
 # Required-Start:    $remote_fs $syslog
 # Required-Stop:     $remote_fs $syslog
