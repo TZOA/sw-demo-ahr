@@ -23,22 +23,57 @@ data_source_context = {'host': '192.168.2.178',
 
 DEVICE_ID = 'D2000-00001'
 
-conn = psycopg2.connect(**data_source_context)
+conn = None
+
+
+def connect_to_db():
+    global conn
+
+    if conn is not None:
+        try:
+            cur = conn.cursor()
+            with cur:
+                cur.execute("SELECT version()")
+
+                #print(cur.fetchone()[0])
+        except psycopg2.OperationalError:
+            conn = None
+
+    if conn is None:
+        try:
+            conn = psycopg2.connect(**data_source_context)
+            print('Connected to database!')
+        except psycopg2.OperationalError:
+            conn = None
+
+    if conn is None:
+        print('Disconnected from database!')
 
 
 def inject_data():
-    with conn:
-        cur = conn.cursor()
+    global conn
 
-        u = time()
-        pm25 = (sin(u / 60) + 1)*100
+    connect_to_db()
 
-        print(u, pm25)
+    if conn is None:
+        return
 
-        with cur:
-            cur.execute("INSERT INTO telemetry (device_id, timestamp, pm25)"
-                        "VALUES (%s, %s, %s)", (DEVICE_ID, datetime.now(), pm25))
+    try:
+        with conn:
+            cur = conn.cursor()
 
+            u = time()
+            pm25 = (sin(u / 60) + 1)*100
+
+            print(u, pm25)
+
+            with cur:
+                cur.execute("INSERT INTO telemetry (device_id, timestamp, pm25)"
+                            "VALUES (%s, %s, %s)", (DEVICE_ID, datetime.now(), pm25))
+
+    except psycopg2.OperationalError:
+        conn = None
+        
 
 if __name__ == '__main__':
 
