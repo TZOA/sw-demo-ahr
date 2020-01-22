@@ -16,7 +16,7 @@ from datetime import datetime
 import threading
 from math import sin
 
-data_source_context = {'host': '192.168.2.178',
+data_source_context = {'host': 'localhost',
                        'dbname': 'pi',
                        'user': 'pi',
                        'password': 'pi'}
@@ -73,9 +73,18 @@ def inject_data():
 
     except psycopg2.OperationalError:
         conn = None
-        
+
+from bluetooth.ble import DiscoveryService
 
 if __name__ == '__main__':
+
+    service = DiscoveryService()
+    devices = service.discover(2)
+
+    for address, name in devices.items():
+        print("Name: {}, address: {}".format(name, address))
+
+    exit(1)
 
     timer = threading.Event()
 
