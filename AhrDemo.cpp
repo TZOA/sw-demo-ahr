@@ -31,7 +31,7 @@ void AhrDemo::run(void) {
 
 
 void AhrDemo::bleDeviceDiscovered(const QBluetoothDeviceInfo &info) {
-  if (info.name() != "HAVEN-CAC-1939-0004")
+  if (info.name() != "HAVEN-CAC-1939-0001")
     return;
 
   //bleDiscoveryAgent_.stop();
@@ -105,7 +105,7 @@ void AhrDemo::bleServiceDiscoveryFinished(void) {
 
   bleService_->discoverDetails();
 
-  QTimer::singleShot(5000, this, SLOT(temp()));
+ // QTimer::singleShot(5000, this, SLOT(temp()));
 } // bleServiceDiscoveryFinished()
 
 
