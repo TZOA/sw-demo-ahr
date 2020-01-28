@@ -15,6 +15,8 @@ from time import time
 from datetime import datetime
 import threading
 from math import sin, pi
+import subprocess
+
 
 data_source_context = {'host': 'localhost',
                        'dbname': 'pi',
@@ -22,6 +24,13 @@ data_source_context = {'host': 'localhost',
                        'password': 'pi'}
 
 DEVICE_ID = 'D2000-00001'
+
+# Make sure to set the correct address in /etc/
+# BLE Address for HAVEN-CAC-1939-0004 is 3C:71:BF:CC:0C:06
+
+# GATTTOOL_PROXY_ADDRESS = '192.168.2.178'
+GATTTOOL_PROXY_ADDRESS = 'localhost'
+GATTTOOL_PROXY_PORT    = 1234
 
 conn = None
 
@@ -84,24 +93,134 @@ def inject_data():
     except psycopg2.OperationalError:
         conn = None
 
-from subprocess import Popen, PIPE, TimeoutExpired
 from time import sleep
+import socket
+
+
+def wait_for(sock, target, timeout=50):
+    buffer = ''
+
+    while target not in buffer:
+        try:
+            buffer = buffer + str(sock.recv(1024))
+        except socket.timeout:
+            pass
+
+        if timeout <= 0:
+            return False, buffer
+
+        timeout = timeout - 1
+
+    return True, buffer
+
+
+def extract_int(target, buffer):
+    # Find the target string in buffer, then grab the following integer.
+    n = buffer.find(target)
+    n = n + len(target)
+    buffer = buffer[n + 1:n + 3]
+
+    # This could be made way more robust, but for now it works...
+    '''
+    match = re.search(r'tor\s*(\d+)' % target, buffer)
+    print(target, buffer)
+    match = re.search(r'\D*tor\s*(\d+)', buffer)
+    if match:
+        print(match.group(1))
+    '''
+
+    # If we found an integer, convert and return it, otherwise just bail and return 0
+    try:
+        return int(buffer)
+    except ValueError:
+        return 0
+
+
+# This function will set the CAC's fan override using gatttool proxied through netcat.
+def set_cac_fan_state(fan_on):
+    # First, make sure no hung or timed out instances of gatttool are running.
+    try:
+        subprocess.run(['sudo', 'killall', 'gatttool'])
+    except FileNotFoundError:
+        print('Failed to run killall on gatttool.')
+        pass  # Ignore if running on a Windows dev box.
+
+    # Next, set the fan state.  It's very important that gatttool and the CAC has this
+    # parameter formatted as a %02d !!
+    if fan_on:
+        next_fan_state = b'01'  # ON
+    else:
+        next_fan_state = b'02'  # OFF
+
+    # Now, open a socket to gatttool, which is being proxied by netcat through a TCP socket.
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.connect((GATTTOOL_PROXY_ADDRESS, GATTTOOL_PROXY_PORT))
+
+            # Make sure reads are non-blocking with a very short timeout.
+            s.setblocking(False)
+            s.settimeout(0.1)
+
+            # Now we're going to issue a bunch of command/response type interactions with gatttool
+            # If anything goes wrong, we timeout, log the fact, and do nothing else...
+            if not wait_for(s, '[LE]>')[0]:
+                raise TimeoutError
+
+            print('Attached to gatttool.')
+
+            s.send(b'connect\n')
+
+            if not wait_for(s, 'Connection successful')[0]:
+                raise TimeoutError
+            print('Connected to CAC.')
+
+            s.send(b'char-read-hnd 3c\n')
+
+            ret = wait_for(s, 'Characteristic value/descriptor:')
+            if not ret[0]:
+                raise TimeoutError
+            print('Fan state override: %s' % extract_int('descriptor:', ret[1]))
+
+            s.send(b'char-write-cmd 3c %s\n' % next_fan_state)
+
+            print('Setting fan state to: %s' % next_fan_state)
+
+            if not wait_for(s, '[LE]>')[0]:
+                raise TimeoutError
+
+            s.send(b'char-read-hnd 3c\n')
+
+            ret = wait_for(s, 'Characteristic value/descriptor:')
+            if not ret[0]:
+                raise TimeoutError
+            print('Fan state override: %s' % extract_int('descriptor:', ret[1]))
+
+            s.send(b'disconnect\n')
+
+            if not wait_for(s, '[LE]>')[0]:
+                raise TimeoutError
+
+            print('Disconnected from CAC.')
+
+            s.send(b'exit\n\n')
+
+    except TimeoutError:
+        print('Timeout trying to interact with CAC.')
+
+    except ConnectionRefusedError:
+        print('Timeout trying to connect to gatttool/netcat.')
+
+    except ConnectionResetError:
+        print('Connection reset while communicating with gatttool/netcat.')
+
 
 if __name__ == '__main__':
 
-    #command_line = "C:\\Progra~1\\PostgreSQL\\12\\bin\\psql.exe -h localhost -d pi -U pi"
-    command_line = "sudo hcitool lescan"
-
-    pprint(command_line.split(' '))
-    command = command_line.split(' ')
-
-    process = Popen(command, stdin=PIPE, stdout=PIPE, stderr=PIPE)
-
-    ret = None
     while True:
-        sleep(1)
-        print(process.stdout.tell())
-        print(process.stdout.read())
+        set_cac_fan_state(True)
+        sleep(15)
+        set_cac_fan_state(False)
+        sleep(15)
 
     exit(1)
 
@@ -110,3 +229,4 @@ if __name__ == '__main__':
     while not timer.wait(1):
         inject_data()
 
+# End of file.
