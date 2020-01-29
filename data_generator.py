@@ -35,6 +35,7 @@ GATTTOOL_PROXY_PORT    = 1234
 
 conn = None
 
+# Setup logging
 logger = logging.getLogger('data_generator')
 logger.setLevel(logging.INFO)
 # create file handler which logs even debug messages
@@ -157,10 +158,10 @@ def extract_int(target, buffer):
 def set_cac_fan_state(fan_on):
     # First, make sure no hung or timed out instances of gatttool are running.
     try:
-        subprocess.run(['sudo', 'killall', 'gatttool'])
+        subprocess.run(['sudo', 'killall', '-q', '-v', 'gatttool'])
     except FileNotFoundError:
         logger.info('Failed to run killall on gatttool.')
-        pass  # Ignore if running on a Windows dev box.
+        return False
 
     # Next, set the fan state.  It's very important that gatttool and the CAC has this
     # parameter formatted as a %02d !!
@@ -223,20 +224,36 @@ def set_cac_fan_state(fan_on):
 
     except TimeoutError:
         logger.warning('Timeout trying to interact with CAC.')
+        return False
 
     except ConnectionRefusedError:
         logger.warning('Timeout trying to connect to gatttool/netcat.')
+        return False
 
     except ConnectionResetError:
         logger.warning('Connection reset while communicating with gatttool/netcat.')
+        return False
+
+    return True
 
 
 if __name__ == '__main__':
 
     while True:
-        set_cac_fan_state(True)
+        retry = 5
+        while not set_cac_fan_state(True) and retry > 0:
+            logger.warning('Failed to set cac fan state, retrying... (%s)' % retry)
+            retry = retry - 1
+            sleep(0.5)
+
         sleep(15)
-        set_cac_fan_state(False)
+
+        retry = 5
+        while not set_cac_fan_state(False) and retry > 0:
+            logger.warning('Failed to set cac fan state, retrying... (%s)' % retry)
+            retry = retry - 1
+            sleep(0.5)
+
         sleep(15)
 
     exit(1)
