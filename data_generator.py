@@ -9,6 +9,7 @@
 # Description:       Enable service provided by daemon.
 ### END INIT INFO
 
+import logging
 import psycopg2
 from pprint import pprint
 from time import time
@@ -33,6 +34,22 @@ GATTTOOL_PROXY_ADDRESS = 'localhost'
 GATTTOOL_PROXY_PORT    = 1234
 
 conn = None
+
+logger = logging.getLogger('data_generator')
+logger.setLevel(logging.INFO)
+# create file handler which logs even debug messages
+fh = logging.FileHandler('/var/log/data_generator.log')
+fh.setLevel(logging.INFO)
+# create console handler with a higher log level
+ch = logging.StreamHandler()
+ch.setLevel(logging.INFO)
+# create formatter and add it to the handlers
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+fh.setFormatter(formatter)
+ch.setFormatter(formatter)
+# add the handlers to the logger
+logger.addHandler(fh)
+logger.addHandler(ch)
 
 
 def connect_to_db():
@@ -142,7 +159,7 @@ def set_cac_fan_state(fan_on):
     try:
         subprocess.run(['sudo', 'killall', 'gatttool'])
     except FileNotFoundError:
-        print('Failed to run killall on gatttool.')
+        logger.info('Failed to run killall on gatttool.')
         pass  # Ignore if running on a Windows dev box.
 
     # Next, set the fan state.  It's very important that gatttool and the CAC has this
@@ -166,24 +183,24 @@ def set_cac_fan_state(fan_on):
             if not wait_for(s, '[LE]>')[0]:
                 raise TimeoutError
 
-            print('Attached to gatttool.')
+            logger.info('Attached to gatttool.')
 
             s.send(b'connect\n')
 
             if not wait_for(s, 'Connection successful')[0]:
                 raise TimeoutError
-            print('Connected to CAC.')
+            logger.info('Connected to CAC.')
 
             s.send(b'char-read-hnd 3c\n')
 
             ret = wait_for(s, 'Characteristic value/descriptor:')
             if not ret[0]:
                 raise TimeoutError
-            print('Fan state override: %s' % extract_int('descriptor:', ret[1]))
+            logger.info('Fan state override: %s' % extract_int('descriptor:', ret[1]))
 
             s.send(b'char-write-cmd 3c %s\n' % next_fan_state)
 
-            print('Setting fan state to: %s' % next_fan_state)
+            logger.info('Setting fan state to: %s' % next_fan_state)
 
             if not wait_for(s, '[LE]>')[0]:
                 raise TimeoutError
@@ -193,25 +210,25 @@ def set_cac_fan_state(fan_on):
             ret = wait_for(s, 'Characteristic value/descriptor:')
             if not ret[0]:
                 raise TimeoutError
-            print('Fan state override: %s' % extract_int('descriptor:', ret[1]))
+            logger.info('Fan state override: %s' % extract_int('descriptor:', ret[1]))
 
             s.send(b'disconnect\n')
 
             if not wait_for(s, '[LE]>')[0]:
                 raise TimeoutError
 
-            print('Disconnected from CAC.')
+            logger.info('Disconnected from CAC.')
 
             s.send(b'exit\n\n')
 
     except TimeoutError:
-        print('Timeout trying to interact with CAC.')
+        logger.warning('Timeout trying to interact with CAC.')
 
     except ConnectionRefusedError:
-        print('Timeout trying to connect to gatttool/netcat.')
+        logger.warning('Timeout trying to connect to gatttool/netcat.')
 
     except ConnectionResetError:
-        print('Connection reset while communicating with gatttool/netcat.')
+        logger.warning('Connection reset while communicating with gatttool/netcat.')
 
 
 if __name__ == '__main__':
