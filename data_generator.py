@@ -161,9 +161,9 @@ def inject_data():
 
             # Cast fan_state as Grafana and DB need it to be an integer for graphing.
             if fan_state is True:
-                fan_state = 1
+                fan_state_i = 1
             else:
-                fan_state = 0
+                fan_state_i = 0
 
             # Write the data to the database.
             logger.info('Inserting data...')
@@ -172,7 +172,7 @@ def inject_data():
                             "temperature, airflow, pressure, humidity, voc, co2, pm25_mc, fan_state)"
                             "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                             (DEVICE_ID, datetime.now(),
-                             temperature, airflow, pressure, humidity, voc, co2, pm25, fan_state))
+                             temperature, airflow, pressure, humidity, voc, co2, pm25, fan_state_i))
 
     # If we encounter any problem invalidate the database connection so we retry it.
     except psycopg2.OperationalError:
