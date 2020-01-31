@@ -75,12 +75,12 @@ def connect_to_db():
     if conn is None:
         try:
             conn = psycopg2.connect(**data_source_context)
-            print('Connected to database!')
+            logger.info('Connected to database!')
         except psycopg2.OperationalError:
             conn = None
 
     if conn is None:
-        print('Disconnected from database!')
+        logger.info('Disconnected from database!')
 
 
 # Some var's used in inject_data() that need to be persistent.
