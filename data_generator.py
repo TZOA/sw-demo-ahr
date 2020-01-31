@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# ### BEGIN INIT INFO
+### BEGIN INIT INFO
 # Provides:          data_generator.py
 # Required-Start:    $remote_fs $syslog
 # Required-Stop:     $remote_fs $syslog
@@ -10,30 +10,33 @@
 ### END INIT INFO
 
 import logging
+from random import random
+
 import psycopg2
-from pprint import pprint
 from time import time
 from datetime import datetime
 import threading
-from math import sin, pi
+from math import sin, tan, pi, sqrt
 import subprocess
+from time import sleep
+import socket
 
-
+# Setup database connection parameters
 data_source_context = {'host': 'localhost',
                        'dbname': 'pi',
                        'user': 'pi',
                        'password': 'pi'}
 
+# Device ID for simulated Haven (CAM) data.
 DEVICE_ID = 'D2000-00001'
 
-# Make sure to set the correct address in /etc/
+# Make sure to set the correct CAC address in /etc/init.d/netcat_gatttool.sh
+# The address(s) can be obtained using 'sudo hcitool lescan | grep CAC'
 # BLE Address for HAVEN-CAC-1939-0004 is 3C:71:BF:CC:0C:06
 
 # GATTTOOL_PROXY_ADDRESS = '192.168.2.178'
 GATTTOOL_PROXY_ADDRESS = 'localhost'
 GATTTOOL_PROXY_PORT    = 1234
-
-conn = None
 
 # Setup logging
 logger = logging.getLogger('data_generator')
@@ -52,6 +55,9 @@ ch.setFormatter(formatter)
 logger.addHandler(fh)
 logger.addHandler(ch)
 
+# Make the database connection available globally.
+conn = None
+
 
 def connect_to_db():
     global conn
@@ -62,7 +68,7 @@ def connect_to_db():
             with cur:
                 cur.execute("SELECT version()")
 
-                #print(cur.fetchone()[0])
+                # print(cur.fetchone()[0])
         except psycopg2.OperationalError:
             conn = None
 
@@ -77,8 +83,21 @@ def connect_to_db():
         print('Disconnected from database!')
 
 
+# Some var's used in inject_data() that need to be persistent.
+decay = 0
+pm25n = 0
+u0 = 0
+u1 = 150
+fan_state = False
+
+
 def inject_data():
     global conn
+    global decay
+    global pm25n
+    global fan_state
+    global u0
+    global u1
 
     connect_to_db()
 
@@ -91,28 +110,66 @@ def inject_data():
 
             u = time()*2*pi
 
-            temperature = sin(u / 3600)*3 + sin(u / (60*17))*0.2 + sin(u / (60*73))*0.8 + 18
-            airflow     = sin(u / 3600)*3 + sin(u / (60*17))*0.2 + sin(u / (60*73))*0.8 + 18
-            pressure    = sin(u / 7200)*100 + sin(u / (60*48))*5 + sin(u / (60*156))*20 + 1000
-            humidity    = sin(u / 1900)*20 + sin(u / (60*44))*5 + sin(u / (60*277))*10 + 40
-            voc         = sin(u / 3600)*3 + sin(u / (60*17))*0.2 + sin(u / (60*73))*0.8 + 18
-            co2         = sin(u / 3600)*200 + sin(u / (60*66))*60 + sin(u / (60*149))*120 + 407
-            pm25        = sin(u / 3600)*10 + sin(u / (60*23))*3 + sin(u / (60*56))*7 + 15
+            # Here you can tweak the look of the simulated data.
+            airflow     = sin(u / 3600)*0.3 + sin(u / (60 * 17))*0.02 + sin(u / (60 * 73))*0.08 + 0.3 + random() * 0.05
+            temperature = sin(u / 3600)*3 + sin(u / (60*17))*0.2 + sin(u / (60*73))*0.8 + 18 + random()*1
+            pressure    = sin(u / 7200)*100 + sin(u / (60*48))*5 + sin(u / (60*156))*20 + 1000 + random()*1
+            humidity    = sin(u / 1900)*20 + sin(u / (60*44))*5 + sin(u / (60*277))*10 + 40 + random()*1
+            voc         = sin(u / 3600)*100 + sin(u / (60*17))*20 + sin(u / (60*73))*8 + 150 + random()*5
+            co2         = sin(u / 3600)*200 + sin(u / (60*66))*60 + sin(u / (60*149))*120 + 407 + random()*3
 
-            print(u, temperature, airflow, pressure, humidity, voc, co2, pm25)
+            # PM2.5
+            if time() - u0 > 300:
+                pm25n = random()*300 + 200
+                decay = 50
+                u0 = time()
 
+            pm25n = pm25n - decay
+
+            decay = decay * 0.85
+
+            if pm25n < 10:
+                pm25n = 10
+
+            pm25 = pm25n + sin(u / (60*2.3))*9 + sin(u / (60*5.6))*17 + random()*20 + 25
+
+            if pm25 < 0:
+                pm25 = 0
+
+
+            # VOC
+            if time() - u1 > 300:
+                u1 = 0
+            if u1 < 100:
+                voc = voc + sin(u1/100*pi*2)*600
+
+            # Fan State
+            if (pm25 > 100 or voc > 600) and fan_state is False:
+                logger.info('Setting fan state to ON.')
+                fan_state = True
+                set_cac_fan_state_with_retry(fan_state)
+
+            if (pm25 < 50 and voc < 400) and fan_state is True:
+                logger.info('Setting fan state to OFF.')
+                fan_state = False
+                set_cac_fan_state_with_retry(fan_state)
+
+            if fan_state is True:
+                airflow = airflow + 8 + random() * 2
+
+            # print(u, temperature, airflow, pressure, humidity, voc, co2, pm25, fan_state)
+
+            # Write the data to the database.
             with cur:
                 cur.execute("INSERT INTO telemetry (device_id, timestamp, "
-                            "temperature, airflow, pressure, humidity, voc, co2, pm25)"
-                            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                            "temperature, airflow, pressure, humidity, voc, co2, pm25_mc, fan_state)"
+                            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                             (DEVICE_ID, datetime.now(),
-                             temperature, airflow, pressure, humidity, voc, co2, pm25))
+                             temperature, airflow, pressure, humidity, voc, co2, pm25, fan_state))
 
+    # If we encounter any problem invalidate the database connection so we retry it.
     except psycopg2.OperationalError:
         conn = None
-
-from time import sleep
-import socket
 
 
 def wait_for(sock, target, timeout=50):
@@ -237,27 +294,29 @@ def set_cac_fan_state(fan_on):
     return True
 
 
+def set_cac_fan_state_with_retry(fan_on, retries=5):
+    while not set_cac_fan_state(fan_on) and retries > 0:
+        logger.warning('Failed to set cac fan state, retrying... (%s)' % retries)
+        retries = retries - 1
+        sleep(0.5)
+
+    if retries == 0:
+        return False
+    return True
+
+
 if __name__ == '__main__':
 
+    '''
     while True:
-        retry = 5
-        while not set_cac_fan_state(True) and retry > 0:
-            logger.warning('Failed to set cac fan state, retrying... (%s)' % retry)
-            retry = retry - 1
-            sleep(0.5)
-
+        set_cac_fan_state_with_retry(True)
         sleep(15)
 
-        retry = 5
-        while not set_cac_fan_state(False) and retry > 0:
-            logger.warning('Failed to set cac fan state, retrying... (%s)' % retry)
-            retry = retry - 1
-            sleep(0.5)
-
+        set_cac_fan_state_with_retry(False)
         sleep(15)
 
     exit(1)
-
+    '''
     timer = threading.Event()
 
     while not timer.wait(1):
