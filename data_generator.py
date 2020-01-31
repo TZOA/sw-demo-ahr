@@ -22,7 +22,7 @@ from time import sleep
 import socket
 
 # Setup database connection parameters
-data_source_context = {'host': 'localhost',
+data_source_context = {'host': '192.168.2.178',
                        'dbname': 'pi',
                        'user': 'pi',
                        'password': 'pi'}
@@ -159,7 +159,14 @@ def inject_data():
 
             # print(u, temperature, airflow, pressure, humidity, voc, co2, pm25, fan_state)
 
+            # Cast fan_state as Grafana and DB need it to be an integer for graphing.
+            if fan_state is True:
+                fan_state = 1
+            else:
+                fan_state = 0
+
             # Write the data to the database.
+            logger.info('Inserting data...')
             with cur:
                 cur.execute("INSERT INTO telemetry (device_id, timestamp, "
                             "temperature, airflow, pressure, humidity, voc, co2, pm25_mc, fan_state)"
