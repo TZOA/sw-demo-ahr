@@ -22,7 +22,7 @@ from time import sleep
 import socket
 
 # Setup database connection parameters
-data_source_context = {'host': '192.168.2.178',
+data_source_context = {'host': 'localhost',
                        'dbname': 'pi',
                        'user': 'pi',
                        'password': 'pi'}
@@ -89,6 +89,7 @@ pm25n = 0
 u0 = 0
 u1 = 150
 fan_state = False
+voc_spike = 0
 
 
 def inject_data():
@@ -98,6 +99,7 @@ def inject_data():
     global fan_state
     global u0
     global u1
+    global voc_spike
 
     connect_to_db()
 
@@ -112,10 +114,10 @@ def inject_data():
 
             # Here you can tweak the look of the simulated data.
             airflow     = sin(u / 3600)*0.3 + sin(u / (60 * 17))*0.02 + sin(u / (60 * 73))*0.08 + 0.3 + random() * 0.05
-            temperature = sin(u / 3600)*3 + sin(u / (60*17))*0.2 + sin(u / (60*73))*0.8 + 18 + random()*1
+            temperature = sin(u / 3600)*3 + sin(u / (60*17))*0.2 + sin(u / (60*73))*0.8 + 18 + random()*.1
             pressure    = sin(u / 7200)*100 + sin(u / (60*48))*5 + sin(u / (60*156))*20 + 1000 + random()*1
             humidity    = sin(u / 1900)*20 + sin(u / (60*44))*5 + sin(u / (60*277))*10 + 40 + random()*1
-            voc         = sin(u / 3600)*100 + sin(u / (60*17))*20 + sin(u / (60*73))*8 + 150 + random()*5
+            voc         = sin(u / 3600)*25 + sin(u / (60*17))*5 + sin(u / (60*73))*8 + 33 + random()*5
             co2         = sin(u / 3600)*200 + sin(u / (60*66))*60 + sin(u / (60*149))*120 + 407 + random()*3
 
             # PM2.5
@@ -127,24 +129,28 @@ def inject_data():
             pm25n = pm25n - decay
 
             decay = decay * 0.85
+            if decay < 2:
+                decay = 2
 
-            if pm25n < 10:
-                pm25n = 10
+            if pm25n < 0:
+                pm25n = 0
 
-            pm25 = pm25n + sin(u / (60*2.3))*9 + sin(u / (60*5.6))*17 + random()*20 + 25
+            pm25 = pm25n + sin(u / (60*2.3))*1 + sin(u / (60*5.6))*2 + random()*2
 
             if pm25 < 0:
                 pm25 = 0
 
 
             # VOC
-            if time() - u1 > 300:
+            if u1 > 300:
                 u1 = 0
+                voc_spike = 1000 + random()*1150
             if u1 < 100:
-                voc = voc + sin(u1/100*pi*2)*600
+                voc = voc + sin(u1/100*pi)*voc_spike
+            u1 = u1 + 1
 
             # Fan State
-            if (pm25 > 100 or voc > 600) and fan_state is False:
+            if (pm25 > 100 or voc > 850) and fan_state is False:
                 logger.info('Setting fan state to ON.')
                 fan_state = True
                 set_cac_fan_state_with_retry(fan_state)
@@ -166,7 +172,7 @@ def inject_data():
                 fan_state_i = 0
 
             # Write the data to the database.
-            logger.info('Inserting data...', fan_state, fan_state_i)
+            print('Inserting data...', fan_state, fan_state_i)
             with cur:
                 cur.execute("INSERT INTO telemetry (device_id, timestamp, "
                             "temperature, airflow, pressure, humidity, voc, co2, pm25_mc, fan_state)"
