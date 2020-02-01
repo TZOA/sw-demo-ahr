@@ -166,7 +166,7 @@ def inject_data():
                 fan_state_i = 0
 
             # Write the data to the database.
-            logger.info('Inserting data...')
+            logger.info('Inserting data...', fan_state, fan_state_i)
             with cur:
                 cur.execute("INSERT INTO telemetry (device_id, timestamp, "
                             "temperature, airflow, pressure, humidity, voc, co2, pm25_mc, fan_state)"
